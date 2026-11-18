@@ -1,0 +1,52 @@
+name: Build Windows
+
+# Baut bei jedem Push (Artefakt im Actions-Lauf) und haengt bei einem Tag
+# wie v0.1.0 den Installer automatisch an ein GitHub-Release an.
+# Der Update-Button im Plugin liest genau dieses Release.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version aus CMakeLists lesen
+        shell: pwsh
+        run: |
+          $cml = Get-Content CMakeLists.txt -Raw
+          $v = [regex]::Match($cml, 'project\(RoutedMidi VERSION ([0-9.]+)').Groups[1].Value
+          $b = [regex]::Match($cml, 'set\(ROUTEDMIDI_BUILD (\d+)\)').Groups[1].Value
+          "APP_VERSION=$v" >> $env:GITHUB_ENV
+          "APP_BUILD=$b" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: cmake -B build
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Inno Setup installieren
+        run: choco install innosetup -y --no-progress
+
+      - name: Installer erstellen
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:APP_VERSION /DAppBuild=$env:APP_BUILD installer\RoutedMidi.iss'
+
+      - name: Installer als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoutedMidi-Setup
+          path: installer/Output/*.exe
+
+      - name: Release erstellen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/*.exe
+          generate_release_notes: false
